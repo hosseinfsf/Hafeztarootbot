@@ -1,14 +1,13 @@
 import os
 import random
-import openai
 import asyncio
 import logging
-import sys
 from dotenv import load_dotenv
+from openai import OpenAI
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# تنظیمات لاگ‌نویسی
+# تنظیمات لاگ
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -17,14 +16,15 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# بررسی وجود توکن
+# بررسی وجود توکن‌ها
 if not TELEGRAM_BOT_TOKEN or not OPENAI_API_KEY:
-    logger.error("لطفاً فایل .env را ایجاد کرده و توکن‌های مورد نیاز را وارد کنید")
-    sys.exit(1)
+    logger.error("❌ لطفاً فایل .env را با توکن‌های موردنیاز پر کنید.")
+    exit(1)
 
-openai.api_key = OPENAI_API_KEY
+# راه‌اندازی OpenAI
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-# لیست کارت‌ها برای تاروت
+# لیست کارت‌های تاروت
 tarot_images = [
     "https://upload.wikimedia.org/wikipedia/en/9/9b/RWS_Tarot_08_Strength.jpg",
     "https://upload.wikimedia.org/wikipedia/en/d/db/RWS_Tarot_16_Tower.jpg",
@@ -34,82 +34,55 @@ tarot_images = [
     "https://upload.wikimedia.org/wikipedia/en/f/f5/RWS_Tarot_17_Star.jpg"
 ]
 
-# پاسخ هوش مصنوعی
-def ai_response_sync(prompt):
+# دریافت پاسخ از هوش مصنوعی
+def ai_response_sync(prompt: str) -> str:
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
-            temperature=0.8
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",  # اگر اکانت GPT-4 داری، می‌تونی gpt-4o-mini بذاری
+            messages=[
+                {"role": "system", "content": "تو یک فالگیر باستانی هستی که تعبیر کارت‌های تاروت را شاعرانه و عمیق بیان می‌کنی."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=400,
+            temperature=0.9
         )
-        return response["choices"][0]["message"]["content"]
+        return response.choices[0].message.content
     except Exception as e:
-        logger.error(f"خطا در دریافت پاسخ از OpenAI: {e}")
-        return "متأسفانه در دریافت پاسخ از هوش مصنوعی مشکلی پیش آمد. لطفاً مجدداً تلاش کنید."
+        logger.error(f"خطا در OpenAI: {e}")
+        return "متأسفم، در تعبیر فال مشکلی پیش آمد 🌧️"
 
-# شروع ربات
+# فرمان شروع
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🔮 فال حافظ", callback_data="hafez")],
-        [InlineKeyboardButton("🃏 تاروت ۳ کارت", callback_data="tarot3"),
-         InlineKeyboardButton("🌟 تاروت ۵ کارت", callback_data="tarot5")]
+        [InlineKeyboardButton("🔮 کارت فال من", callback_data="tarot")]
     ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "سلام فرفری 😍✨\nمن ربات فال هوشمندم! انتخاب کن ببین چی در انتظارت هست 💫",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "سلام! من فال‌گیر حافظ تاروت هستم 🧿\nروی دکمه زیر بزن تا کارتت رو بکشم:",
+        reply_markup=reply_markup
     )
 
-# هندل انتخاب فال
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# هندلر برای کارت فال
+async def tarot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    image_url = random.choice(tarot_images)
+    prompt = f"تعبیر کارت تاروت زیر را بنویس:\n{image_url}"
+    loop = asyncio.get_event_loop()
+    ai_text = await loop.run_in_executor(None, ai_response_sync, prompt)
+    await query.message.reply_photo(photo=image_url, caption=ai_text)
 
-    if query.data == "hafez":
-        prompt = """یک غزل حافظ بنویس و در پایان، 
-        یک تفسیر احساسی و خودمانی در ۵ خط بده. 
-        با لحن دل‌گرم و شاعرانه، پر از ایموجی ❤️🌙✨"""
-        image_url = "https://upload.wikimedia.org/wikipedia/commons/7/7a/Hafez_Tomb_02.jpg"
+# مدیریت خطاها
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(msg="⚠️ خطا در ربات:", exc_info=context.error)
 
-    elif query.data == "tarot3":
-        prompt = """یک فال تاروت ۳ کارتی بنویس. 
-        نام هر کارت + معنی کلی + تفسیر ۷ خطی احساسی و مثبت بده.
-        متن باید صمیمی و پر از ایموجی باشه 💫💖🃏"""
-        image_url = random.choice(tarot_images)
-
-    elif query.data == "tarot5":
-        prompt = """یک فال تاروت ۵ کارتی بنویس. 
-        هر کارت و معنی‌اش را همراه با تفسیر ۷ خطی احساسی، عاشقانه و پرانرژی بنویس 🌟💌✨"""
-        image_url = random.choice(tarot_images)
-    else:
-        prompt = "یک فال عمومی زیبا و مثبت بنویس 🌞✨"
-        image_url = random.choice(tarot_images)
-
-    # نمایش پیام "در حال پردازش"
-    await query.edit_message_text("منتظر بمانید، در حال آماده‌سازی فال شما هستم... ✨")
-    
-    # استفاده از تابع همگام برای دریافت پاسخ
-    response_text = ai_response_sync(prompt)
-
-    # ارسال عکس و فال
-    try:
-        await query.message.reply_photo(
-            photo=image_url,
-            caption=response_text[:1024],  # محدودیت طول پیام تلگرام
-        )
-        # حذف پیام "در حال پردازش"
-        await query.delete_message()
-    except Exception as e:
-        logger.error(f"خطا در ارسال پاسخ: {e}")
-        await query.edit_message_text("متأسفانه در ارسال پاسخ مشکلی پیش آمد. لطفاً مجدداً تلاش کنید.")
-
-# اجرای ربات
+# تابع اصلی
 def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button))
-    
-    logger.info("ربات در حال اجراست...")
+    app.add_handler(CallbackQueryHandler(tarot))
+    app.add_error_handler(error_handler)
+    logger.info("✨ ربات در حال اجراست...")
     app.run_polling()
 
 if __name__ == "__main__":
