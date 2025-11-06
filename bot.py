@@ -110,7 +110,19 @@ def main():
     app.add_handler(CallbackQueryHandler(button))
     
     logger.info("ربات در حال اجراست...")
-    app.run_polling()
+
+    try:
+        app.run_polling()
+    except RuntimeError as e:
+        if "no current event loop" in str(e):
+            # استفاده از رویکرد جایگزین برای سازگاری با پایتون 3.14+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(app.initialize())
+            loop.create_task(app.updater.start_polling())
+            loop.run_forever()
+        else:
+            raise
 
 if __name__ == "__main__":
     main()
